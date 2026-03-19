@@ -14,8 +14,20 @@ const resizeToastEl = document.getElementById('resize-toast');
 const leaveModalEl = document.getElementById('leave-modal');
 const leaveStayBtn = document.getElementById('leave-stay-btn');
 const leaveConfirmBtn = document.getElementById('leave-confirm-btn');
+const musicAudioEl = document.getElementById('site-music');
+const musicToggleBtn = document.getElementById('music-toggle');
+const musicVolumeEl = document.getElementById('music-volume');
+const voiceToggleBtn = document.getElementById('voice-toggle');
+const voiceToastEl = document.getElementById('voice-toast');
+const voiceToastTextEl = document.getElementById('voice-toast-text');
+const asciiToggleBtn = document.getElementById('ascii-toggle');
+const asciiStatusEl = document.getElementById('ascii-status');
+const asciiOutputCanvasEl = document.getElementById('ascii-output-canvas');
+const asciiVideoEl = document.getElementById('ascii-video-source');
+const asciiCanvasEl = document.getElementById('ascii-video-canvas');
 const visitCountEl = document.querySelector('[data-visit-count]');
 const fpsEl = document.querySelector('[data-perf="fps"]');
+const scrollSpeedEl = document.querySelector('[data-perf="scroll-speed"]');
 const INTERACTIVE_SELECTOR = 'a, button, [role="button"], input, textarea, select, label';
 const TYPING_SPEED = {
     access: 55,
@@ -27,7 +39,6 @@ const METRIC_INTERVAL = 4200;
 const FPS_UPDATE_INTERVAL = 600;
 const RETURNING_VISITOR_KEY = 'vd_portfolio_visited';
 const VISIT_COUNT_KEY = 'vd_portfolio_visit_count';
-const LOW_BATTERY_TOAST_KEY = 'vd_low_battery_toast_shown';
 const LOW_BATTERY_THRESHOLD = 20;
 const LEAVE_WARNING_TEXT = 'I hope you copied the link. Have a great day.';
 const ENABLE_NATIVE_LEAVE_WARNING = true;
@@ -35,6 +46,24 @@ const AWAY_TITLE_TEXT = 'Ready to discuss your project? 💼';
 const TAB_BLINK_INTERVAL = 900;
 const RESIZE_TOAST_DEBOUNCE = 260;
 const RESIZE_TOAST_COOLDOWN = 7000;
+const RESIZE_WIDTH_THRESHOLD = 16;
+const VOICE_TOAST_DURATION = 4800;
+const MUSIC_STATE_KEY = 'vd_music_enabled';
+const MUSIC_VOLUME_KEY = 'vd_music_volume';
+const DEFAULT_MUSIC_VOLUME = 0.3;
+const ASCII_FOREGROUND_CHARSET = ' .,:;i1tfLCG08@ANGULARRXJSNGRXTS';
+const ASCII_BACKGROUND_CHARSET = '   ..::';
+const ASCII_EDGE_WEIGHT = 0.5;
+const ASCII_LUMA_WEIGHT = 0.35;
+const ASCII_CENTER_WEIGHT = 0.25;
+const ASCII_HUMAN_THRESHOLD = 0.3;
+const ASCII_TARGET_FPS = 16;
+const ASCII_CHAR_WIDTH_FACTOR = 0.62;
+const ASCII_LINE_HEIGHT_FACTOR = 1.05;
+const ASCII_MOBILE_COLS = 58;
+const ASCII_DESKTOP_COLS = 92;
+const ASCII_OUTPUT_SIZE_MOBILE = 300;
+const ASCII_OUTPUT_SIZE_DESKTOP = 512;
 let batteryText = 'n/a';
 let allowPageLeave = false;
 let pendingLeaveHref = '';
@@ -42,6 +71,15 @@ let tabBlinkIntervalId = null;
 let resizeDebounceId = null;
 let resizeToastCooldownId = null;
 let canShowResizeToast = true;
+let lastResizeWidth = window.innerWidth;
+let lastResizeHeight = window.innerHeight;
+let lowBatteryToastShown = false;
+let shouldResumeMusicOnFocus = false;
+let asciiStream = null;
+let asciiRafId = null;
+let asciiLastFrameTime = 0;
+let asciiRunning = false;
+let asciiOutputCtx = null;
 const initialTitle = document.title;
 const initialFaviconHref =
     document.querySelector('link[rel="icon"]')?.getAttribute('href') ||
@@ -106,6 +144,423 @@ const renderThemeButton = () => {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const clientDataLabels = document.querySelectorAll('[data-client]');
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const drawAsciiOutput = (lines) => {
+    if (!asciiOutputCanvasEl) return;
+    if (!asciiOutputCtx) {
+        asciiOutputCtx = asciiOutputCanvasEl.getContext('2d');
+    }
+    if (!asciiOutputCtx) return;
+
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    const outputSize = isMobile ? ASCII_OUTPUT_SIZE_MOBILE : ASCII_OUTPUT_SIZE_DESKTOP;
+    const dpr = clamp(window.devicePixelRatio || 1, 1, 2);
+    const realWidth = Math.floor(outputSize * dpr);
+    const realHeight = Math.floor(outputSize * dpr);
+    if (asciiOutputCanvasEl.width !== realWidth || asciiOutputCanvasEl.height !== realHeight) {
+        asciiOutputCanvasEl.width = realWidth;
+        asciiOutputCanvasEl.height = realHeight;
+        asciiOutputCanvasEl.style.width = `${ outputSize }px`;
+        asciiOutputCanvasEl.style.height = `${ outputSize }px`;
+    }
+    asciiOutputCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    asciiOutputCtx.imageSmoothingEnabled = false;
+
+    const maxLineLen = Math.max(1, ...(lines.map((line) => line.length)));
+    const maxRows = Math.max(1, lines.length);
+    const padding = isMobile ? 6 : 8;
+    const drawableWidth = outputSize - padding * 2;
+    const drawableHeight = outputSize - padding * 2;
+    const widthLimitedFont = drawableWidth / (maxLineLen * ASCII_CHAR_WIDTH_FACTOR);
+    const heightLimitedFont = drawableHeight / (maxRows * ASCII_LINE_HEIGHT_FACTOR);
+    const fontSize = clamp(Math.min(widthLimitedFont, heightLimitedFont), isMobile ? 4 : 5, isMobile ? 9 : 11);
+    const lineHeight = fontSize * ASCII_LINE_HEIGHT_FACTOR;
+    const offsetX = padding;
+    const offsetY = padding;
+
+    const ctx = asciiOutputCtx;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, outputSize, outputSize);
+    ctx.font = `${ fontSize.toFixed(2) }px "JetBrains Mono", ui-monospace, SFMono-Regular, monospace`;
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = root.classList.contains('dark') ? '#86efac' : '#16a34a';
+
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        ctx.fillText(lines[lineIndex], offsetX, offsetY + lineIndex * lineHeight);
+    }
+};
+
+const setAsciiStatus = (text) => {
+    if (asciiStatusEl) asciiStatusEl.textContent = text;
+};
+
+const syncAsciiToggle = () => {
+    if (!asciiToggleBtn) return;
+    asciiToggleBtn.textContent = asciiRunning ? 'Stop' : 'Start';
+};
+
+const stopAsciiMirror = () => {
+    if (asciiRafId) {
+        cancelAnimationFrame(asciiRafId);
+        asciiRafId = null;
+    }
+    if (asciiStream) {
+        asciiStream.getTracks().forEach((track) => track.stop());
+        asciiStream = null;
+    }
+    if (asciiVideoEl) {
+        asciiVideoEl.srcObject = null;
+    }
+    asciiRunning = false;
+    asciiLastFrameTime = 0;
+    drawAsciiOutput(['ASCII mirror standby...']);
+    setAsciiStatus('Camera is off. Press Start to launch ASCII mirror.');
+    syncAsciiToggle();
+};
+
+const renderAsciiFrame = (now) => {
+    if (!asciiRunning || !asciiVideoEl || !asciiCanvasEl || !asciiOutputCanvasEl) return;
+    const frameInterval = 1000 / ASCII_TARGET_FPS;
+    if (asciiLastFrameTime && now - asciiLastFrameTime < frameInterval) {
+        asciiRafId = requestAnimationFrame(renderAsciiFrame);
+        return;
+    }
+    asciiLastFrameTime = now;
+
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    const cols = window.matchMedia('(max-width: 767px)').matches ? ASCII_MOBILE_COLS : ASCII_DESKTOP_COLS;
+    const outputSize = isMobile ? ASCII_OUTPUT_SIZE_MOBILE : ASCII_OUTPUT_SIZE_DESKTOP;
+    const rows = Math.max(
+        28,
+        Math.floor(cols * (ASCII_CHAR_WIDTH_FACTOR / ASCII_LINE_HEIGHT_FACTOR) * (outputSize / outputSize))
+    );
+
+    asciiCanvasEl.width = cols;
+    asciiCanvasEl.height = rows;
+    const ctx = asciiCanvasEl.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+        setAsciiStatus('Canvas is unavailable in this browser.');
+        asciiRafId = requestAnimationFrame(renderAsciiFrame);
+        return;
+    }
+
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(asciiVideoEl, -cols, 0, cols, rows);
+    ctx.restore();
+    const imageData = ctx.getImageData(0, 0, cols, rows).data;
+    const foregroundMaxIndex = ASCII_FOREGROUND_CHARSET.length - 1;
+    const backgroundMaxIndex = ASCII_BACKGROUND_CHARSET.length - 1;
+    const gray = new Float32Array(cols * rows);
+
+    for (let y = 0; y < rows; y += 1) {
+        for (let x = 0; x < cols; x += 1) {
+            const offset = (y * cols + x) * 4;
+            const r = imageData[offset];
+            const g = imageData[offset + 1];
+            const b = imageData[offset + 2];
+            gray[y * cols + x] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        }
+    }
+    const lines = [];
+
+    for (let y = 0; y < rows; y += 1) {
+        let line = '';
+        for (let x = 0; x < cols; x += 1) {
+            const idx = y * cols + x;
+            const current = gray[idx];
+            const right = gray[y * cols + Math.min(cols - 1, x + 1)];
+            const down = gray[Math.min(rows - 1, y + 1) * cols + x];
+            const edge = clamp((Math.abs(current - right) + Math.abs(current - down)) / 255, 0, 1);
+            const luma = 1 - current / 255;
+
+            const dx = (x / Math.max(1, cols - 1)) - 0.5;
+            const dy = (y / Math.max(1, rows - 1)) - 0.5;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const centerBoost = clamp(1 - dist * 2, 0, 1);
+
+            const humanScore = clamp(
+                luma * ASCII_LUMA_WEIGHT +
+                edge * ASCII_EDGE_WEIGHT +
+                centerBoost * ASCII_CENTER_WEIGHT,
+                0,
+                1
+            );
+
+            if (humanScore < ASCII_HUMAN_THRESHOLD) {
+                const bgIndex = Math.min(backgroundMaxIndex, Math.floor(luma * backgroundMaxIndex));
+                line += ASCII_BACKGROUND_CHARSET[bgIndex] || ' ';
+                continue;
+            }
+
+            const fgIndex = Math.min(foregroundMaxIndex, Math.floor(humanScore * foregroundMaxIndex));
+            line += ASCII_FOREGROUND_CHARSET[fgIndex] || ' ';
+        }
+        lines.push(line);
+    }
+
+    drawAsciiOutput(lines);
+    asciiRafId = requestAnimationFrame(renderAsciiFrame);
+};
+
+const startAsciiMirror = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+        setAsciiStatus('Camera API is unavailable in this browser.');
+        return;
+    }
+    if (!asciiVideoEl || !asciiOutputCanvasEl) return;
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'user',
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+            },
+            audio: false,
+        });
+        asciiStream = stream;
+        asciiVideoEl.srcObject = stream;
+        await asciiVideoEl.play();
+        asciiRunning = true;
+        setAsciiStatus('Camera active. Rendering real-time ASCII mirror.');
+        syncAsciiToggle();
+        asciiRafId = requestAnimationFrame(renderAsciiFrame);
+    } catch (_error) {
+        asciiRunning = false;
+        setAsciiStatus('Camera access denied or unavailable.');
+        syncAsciiToggle();
+    }
+};
+
+const initAsciiMirror = () => {
+    if (!asciiToggleBtn) return;
+    syncAsciiToggle();
+    drawAsciiOutput(['ASCII mirror standby...']);
+    asciiToggleBtn.addEventListener('click', () => {
+        if (asciiRunning) {
+            stopAsciiMirror();
+            return;
+        }
+        startAsciiMirror();
+    });
+    window.addEventListener('beforeunload', () => {
+        if (asciiStream) stopAsciiMirror();
+    });
+};
+
+const initBackgroundMusic = () => {
+    if (!musicAudioEl || !musicToggleBtn || !musicVolumeEl) return;
+
+    const syncMusicButton = () => {
+        musicToggleBtn.textContent = musicAudioEl.paused ? 'Play' : 'Stop';
+    };
+
+    const persistMusicState = (isPlaying) => {
+        try {
+            localStorage.setItem(MUSIC_STATE_KEY, isPlaying ? '1' : '0');
+        } catch (_error) {
+            // Ignore storage limits/privacy restrictions.
+        }
+    };
+
+    const playMusic = async () => {
+        try {
+            await musicAudioEl.play();
+            persistMusicState(true);
+        } catch (_error) {
+            // Autoplay may be blocked by browser policy until user interaction.
+        } finally {
+            syncMusicButton();
+        }
+    };
+
+    let initialVolume = DEFAULT_MUSIC_VOLUME;
+    try {
+        const storedVolume = Number.parseFloat(localStorage.getItem(MUSIC_VOLUME_KEY) ?? '');
+        if (Number.isFinite(storedVolume)) {
+            initialVolume = clamp(storedVolume, 0, 1);
+        }
+    } catch (_error) {
+        // Keep default volume.
+    }
+
+    musicAudioEl.volume = initialVolume;
+    musicVolumeEl.value = `${ Math.round(initialVolume * 100) }`;
+
+    let shouldAutoPlay = true;
+    try {
+        shouldAutoPlay = localStorage.getItem(MUSIC_STATE_KEY) !== '0';
+    } catch (_error) {
+        shouldAutoPlay = true;
+    }
+
+    if (shouldAutoPlay) {
+        playMusic();
+    } else {
+        musicAudioEl.pause();
+        syncMusicButton();
+    }
+
+    musicToggleBtn.addEventListener('click', () => {
+        if (musicAudioEl.paused) {
+            playMusic();
+            return;
+        }
+        musicAudioEl.pause();
+        persistMusicState(false);
+        syncMusicButton();
+    });
+
+    musicVolumeEl.addEventListener('input', () => {
+        const volume = clamp(Number.parseInt(musicVolumeEl.value, 10) / 100, 0, 1);
+        musicAudioEl.volume = volume;
+        try {
+            localStorage.setItem(MUSIC_VOLUME_KEY, `${ volume }`);
+        } catch (_error) {
+            // Ignore storage limits/privacy restrictions.
+        }
+    });
+
+    musicAudioEl.addEventListener('play', syncMusicButton);
+    musicAudioEl.addEventListener('pause', syncMusicButton);
+    syncMusicButton();
+};
+
+const applyThemeMode = (mode) => {
+    if (mode === 'dark') {
+        root.classList.add('dark');
+        localStorage.setItem('theme', 'dark');
+    } else {
+        root.classList.remove('dark');
+        localStorage.setItem('theme', 'light');
+    }
+    renderThemeButton();
+};
+
+const initVoiceControl = () => {
+    if (!voiceToggleBtn) return;
+    const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    const setVoiceUi = (isActive, isSupported = true) => {
+        if (!isSupported) {
+            voiceToggleBtn.textContent = 'Voice N/A';
+            voiceToggleBtn.disabled = true;
+            voiceToggleBtn.classList.add('opacity-60', 'cursor-not-allowed');
+            return;
+        }
+        voiceToggleBtn.textContent = isActive ? 'Voice On' : 'Voice Off';
+        voiceToggleBtn.classList.toggle('bg-cyan-500/15', isActive);
+        voiceToggleBtn.classList.toggle('dark:bg-green-500/15', isActive);
+    };
+
+    if (!SpeechRecognitionApi) {
+        setVoiceUi(false, false);
+        return;
+    }
+
+    const recognition = new SpeechRecognitionApi();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+
+    let shouldListen = false;
+    let voiceToastTimer = null;
+
+    const showVoiceToast = (message, heardText = '') => {
+        if (!voiceToastEl || !voiceToastTextEl) return;
+        const normalizedHeardText = (heardText || '').trim();
+        voiceToastTextEl.textContent = normalizedHeardText
+            ? `${ message } You said: "${ normalizedHeardText }".`
+            : message;
+        voiceToastEl.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            voiceToastEl.classList.remove('opacity-0', 'translate-y-2');
+            voiceToastEl.classList.add('opacity-100', 'translate-y-0');
+        });
+
+        if (voiceToastTimer) clearTimeout(voiceToastTimer);
+        voiceToastTimer = setTimeout(() => {
+            voiceToastEl.classList.remove('opacity-100', 'translate-y-0');
+            voiceToastEl.classList.add('opacity-0', 'translate-y-2');
+            setTimeout(() => {
+                voiceToastEl.classList.add('hidden');
+            }, 520);
+        }, VOICE_TOAST_DURATION);
+    };
+
+    const runCommand = (rawCommand) => {
+        const command = rawCommand.toLowerCase().trim();
+        console.log('Your command:', command);
+        let handled = false;
+        if (command.includes('dark mode')) {
+            applyThemeMode('dark');
+            handled = true;
+        }
+        if (command.includes('light mode')) {
+            applyThemeMode('light');
+            handled = true;
+        }
+        if (command.includes('play music') && musicAudioEl?.paused) {
+            musicToggleBtn?.click();
+            handled = true;
+        }
+        if (command.includes('stop music') && musicAudioEl && !musicAudioEl.paused) {
+            musicToggleBtn?.click();
+            handled = true;
+        }
+        if (!handled) {
+            showVoiceToast('Unknown command. Try: Dark Mode, Light Mode, Play Music, Stop Music.', rawCommand);
+        }
+    };
+
+    recognition.addEventListener('result', (event) => {
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            if (!result.isFinal) continue;
+            const transcript = result[0]?.transcript ?? '';
+            runCommand(transcript);
+        }
+    });
+
+    recognition.addEventListener('end', () => {
+        if (!shouldListen) return;
+        try {
+            recognition.start();
+        } catch (_error) {
+            shouldListen = false;
+            setVoiceUi(false);
+        }
+    });
+
+    recognition.addEventListener('error', () => {
+        if (!shouldListen) return;
+        shouldListen = false;
+        setVoiceUi(false);
+    });
+
+    voiceToggleBtn.addEventListener('click', () => {
+        if (shouldListen) {
+            shouldListen = false;
+            recognition.stop();
+            setVoiceUi(false);
+            return;
+        }
+        shouldListen = true;
+        setVoiceUi(true);
+        try {
+            recognition.start();
+        } catch (_error) {
+            shouldListen = false;
+            setVoiceUi(false);
+        }
+    });
+
+    setVoiceUi(false);
+};
+
 const initFpsHud = () => {
     if (!fpsEl) return;
     let frames = 0;
@@ -124,6 +579,31 @@ const initFpsHud = () => {
     };
 
     requestAnimationFrame(tick);
+};
+
+const initScrollSpeedHud = () => {
+    if (!scrollSpeedEl) return;
+    let lastY = window.scrollY;
+    let lastTime = performance.now();
+    let stopTimer = null;
+
+    window.addEventListener('scroll', () => {
+        const now = performance.now();
+        const currentY = window.scrollY;
+        const dy = Math.abs(currentY - lastY);
+        const dt = now - lastTime;
+        if (dt > 0) {
+            const speed = Math.round((dy * 1000) / dt);
+            scrollSpeedEl.textContent = `${ speed }`;
+        }
+        lastY = currentY;
+        lastTime = now;
+
+        if (stopTimer) clearTimeout(stopTimer);
+        stopTimer = setTimeout(() => {
+            scrollSpeedEl.textContent = '0';
+        }, 140);
+    }, { passive: true });
 };
 
 const initBatteryInfo = async () => {
@@ -183,14 +663,16 @@ const showLowBatteryToast = () => {
 };
 
 const shouldNotifyLowBattery = (level, charging) => {
-    if (charging) return false;
-    if (level > LOW_BATTERY_THRESHOLD) return false;
-    try {
-        if (sessionStorage.getItem(LOW_BATTERY_TOAST_KEY) === '1') return false;
-        sessionStorage.setItem(LOW_BATTERY_TOAST_KEY, '1');
-    } catch (_error) {
-        // Ignore storage restrictions; still allow one notification attempt.
+    if (charging) {
+        lowBatteryToastShown = false;
+        return false;
     }
+    if (level > LOW_BATTERY_THRESHOLD) {
+        lowBatteryToastShown = false;
+        return false;
+    }
+    if (lowBatteryToastShown) return false;
+    lowBatteryToastShown = true;
     return true;
 };
 
@@ -307,6 +789,12 @@ const initAttentionOnTabBlur = () => {
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
+            if (musicAudioEl && !musicAudioEl.paused) {
+                shouldResumeMusicOnFocus = true;
+                musicAudioEl.pause();
+            } else {
+                shouldResumeMusicOnFocus = false;
+            }
             document.title = AWAY_TITLE_TEXT;
             setFavicon(blinkFavicons[0]);
             if (tabBlinkIntervalId) clearInterval(tabBlinkIntervalId);
@@ -326,6 +814,13 @@ const initAttentionOnTabBlur = () => {
             setFavicon(initialFaviconHref);
         } else {
             setFavicon(buildEmojiFavicon('💻'));
+        }
+
+        if (musicAudioEl && shouldResumeMusicOnFocus) {
+            musicAudioEl.play().catch(() => {
+                // Ignore autoplay restrictions after tab focus restore.
+            });
+            shouldResumeMusicOnFocus = false;
         }
     });
 };
@@ -358,6 +853,14 @@ const initResizeToast = () => {
     window.addEventListener('resize', () => {
         if (resizeDebounceId) clearTimeout(resizeDebounceId);
         resizeDebounceId = setTimeout(() => {
+            const nextWidth = window.innerWidth;
+            const nextHeight = window.innerHeight;
+            const widthDelta = Math.abs(nextWidth - lastResizeWidth);
+            const heightDelta = Math.abs(nextHeight - lastResizeHeight);
+            const isIosToolbarResize = widthDelta < RESIZE_WIDTH_THRESHOLD && heightDelta > 0;
+            lastResizeWidth = nextWidth;
+            lastResizeHeight = nextHeight;
+            if (isIosToolbarResize) return;
             showResizeToast();
         }, RESIZE_TOAST_DEBOUNCE);
     });
@@ -405,6 +908,7 @@ const clientInfo = () => {
 
 initBatteryInfo();
 initFpsHud();
+initScrollSpeedHud();
 clientInfo();
 setInterval(clientInfo, METRIC_INTERVAL * 2);
 
@@ -459,6 +963,9 @@ initLeaveWarning();
 initCustomLeaveDialog();
 initAttentionOnTabBlur();
 initResizeToast();
+initBackgroundMusic();
+initVoiceControl();
+initAsciiMirror();
 
 if (themeToggle) {
     themeToggle.addEventListener('click', () => {

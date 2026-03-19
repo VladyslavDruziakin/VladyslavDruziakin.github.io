@@ -66,8 +66,13 @@
     <p class="font-bold uppercase tracking-[0.2em]">Responsive Check</p>
     <p class="mt-1 text-xs">Oh, checking responsiveness? No worries )))</p>
 </div>
-<div class="mx-auto max-w-6xl px-4 pb-16 pt-8 sm:px-6 lg:px-8">
-    <header class="mb-8 flex flex-wrap items-start justify-between gap-4 animate-fade-up min-h-[10rem]">
+<div id="voice-toast"
+     class="pointer-events-none fixed right-4 top-4 z-[9965] hidden w-[min(92vw,360px)] translate-y-2 rounded-lg border border-amber-500/65 bg-white/95 px-4 py-3 text-sm text-amber-900 opacity-0 shadow-[0_0_0_1px_rgba(245,158,11,.25),0_0_18px_rgba(245,158,11,.18)] backdrop-blur transition duration-500 dark:border-amber-400/70 dark:bg-zinc-950/85 dark:text-amber-200 dark:shadow-[0_0_0_1px_rgba(251,191,36,.25),0_0_18px_rgba(251,191,36,.18)]">
+    <p class="font-bold uppercase tracking-[0.2em]">Voice Command</p>
+    <p id="voice-toast-text" class="mt-1 text-xs">Unknown command.</p>
+</div>
+<div class="mx-auto max-w-6xl px-4 pb-40 pt-8 sm:px-6 lg:px-8">
+    <header class="relative z-10 mb-8 flex max-sm:flex-col flex-wrap items-start justify-between gap-4 animate-fade-up min-h-[10rem]">
         <div>
             <p id="access-granted"
                class="mb-2 min-h-[1.1rem] text-xs uppercase tracking-[0.3em] text-neon-600 dark:text-matrix-400"
@@ -83,14 +88,27 @@
             </p>
         </div>
 
-        <button
-                id="theme-toggle"
-                class="rounded-lg border border-cyan-700/70 bg-white/80 px-3 py-2 text-xs font-bold uppercase tracking-widest text-cyan-800 shadow-lightneon transition duration-300 hover:-translate-y-1 hover:scale-[1.02] hover:shadow-[0_0_0_1px_rgba(6,182,212,.6),0_0_34px_rgba(6,182,212,.35)] active:translate-y-0 dark:border-green-500/70 dark:bg-zinc-900 dark:text-green-300 dark:shadow-darkneon dark:hover:shadow-[0_0_0_1px_rgba(34,197,94,.6),0_0_34px_rgba(34,197,94,.35)]"
-                type="button"
-                aria-label="Toggle color theme"
-        >
-            Switch To Dark
-        </button>
+        <div class="flex items-center gap-2">
+            <div class="group relative">
+                <button id="voice-toggle"
+                        class="rounded-lg border border-cyan-700/70 bg-white/80 px-3 py-2 text-xs font-bold uppercase tracking-widest text-cyan-800 shadow-lightneon transition duration-300 hover:-translate-y-1 hover:scale-[1.02] hover:shadow-[0_0_0_1px_rgba(6,182,212,.6),0_0_34px_rgba(6,182,212,.35)] active:translate-y-0 dark:border-green-500/70 dark:bg-zinc-900 dark:text-green-300 dark:shadow-darkneon dark:hover:shadow-[0_0_0_1px_rgba(34,197,94,.6),0_0_34px_rgba(34,197,94,.35)]"
+                        type="button"
+                        aria-label="Voice control commands: Dark Mode, Light Mode, Play Music, Stop Music">
+                    Voice Off
+                </button>
+                <div class="pointer-events-none absolute max-md:left-0 md:right-0 top-full z-20 mt-2 hidden w-64 rounded-md border border-cyan-600/60 bg-white/95 p-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-900 shadow-lightneon group-hover:block dark:border-green-500/60 dark:bg-zinc-950/95 dark:text-green-200 dark:shadow-darkneon">
+                    Commands: Dark Mode · Light Mode · Play Music · Stop Music
+                </div>
+            </div>
+            <button
+                    id="theme-toggle"
+                    class="rounded-lg border border-cyan-700/70 bg-white/80 px-3 py-2 text-xs font-bold uppercase tracking-widest text-cyan-800 shadow-lightneon transition duration-300 hover:-translate-y-1 hover:scale-[1.02] hover:shadow-[0_0_0_1px_rgba(6,182,212,.6),0_0_34px_rgba(6,182,212,.35)] active:translate-y-0 dark:border-green-500/70 dark:bg-zinc-900 dark:text-green-300 dark:shadow-darkneon dark:hover:shadow-[0_0_0_1px_rgba(34,197,94,.6),0_0_34px_rgba(34,197,94,.35)]"
+                    type="button"
+                    aria-label="Toggle color theme"
+            >
+                Switch To Dark
+            </button>
+        </div>
     </header>
 
     <section
@@ -102,6 +120,7 @@
                 decoding="async"
                 width="160"
                 height="160"
+                fetchpriority=high
                 class="h-40 w-40 rounded-xl border border-cyan-700/55 object-cover dark:border-green-500/60"
         />
         <div>
@@ -515,7 +534,7 @@
         </article>
     </section>
 
-    <section class="grid gap-4 md:grid-cols-2 animate-fade-up [animation-delay:520ms]">
+    <section class="mb-8 grid gap-4 md:grid-cols-2 animate-fade-up [animation-delay:520ms]">
         <article
                 class="rounded-xl border border-cyan-700/35 bg-white/80 p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-500/60 hover:shadow-lightneon dark:border-green-500/35 dark:bg-zinc-950/70 dark:hover:border-green-400/60 dark:hover:shadow-darkneon">
             <h2 data-text="Education"
@@ -541,10 +560,50 @@
             </ul>
         </article>
     </section>
+
+    <section class="mb-8 animate-fade-up [animation-delay:640ms]">
+        <article class="rounded-xl border border-cyan-700/35 bg-white/85 p-5 transition duration-300 hover:-translate-y-1 hover:border-cyan-500/60 hover:shadow-lightneon dark:border-green-500/35 dark:bg-zinc-950/70 dark:hover:border-green-400/60 dark:hover:shadow-darkneon">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 data-text="ASCII Mirror"
+                    class="relative text-xl font-bold uppercase tracking-wider text-cyan-700 motion-safe:animate-glitch-jitter after:pointer-events-none after:absolute after:left-[1px] after:top-0 after:opacity-[0.35] after:text-cyan-500 after:content-[attr(data-text)] after:[clip-path:inset(0_0_52%_0)] dark:text-matrix-400 dark:after:text-green-500">
+                    ASCII Mirror
+                </h2>
+                <button id="ascii-toggle"
+                        class="rounded-md border border-cyan-700/60 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-cyan-800 transition duration-300 hover:-translate-y-0.5 hover:bg-cyan-500/10 hover:shadow-lightneon dark:border-green-500/60 dark:text-green-300 dark:hover:bg-green-500/10 dark:hover:shadow-darkneon"
+                        type="button">
+                    Start
+                </button>
+            </div>
+            <p id="ascii-status" class="mb-3 text-xs text-slate-700 dark:text-green-300">
+                Camera is off. Press Start to launch ASCII mirror.
+            </p>
+            <canvas id="ascii-output-canvas"
+                    class="mx-auto block h-[300px] w-[300px] rounded-lg border border-cyan-700/25 bg-black shadow-inner md:h-[512px] md:w-[512px] dark:border-green-500/30"></canvas>
+            <video id="ascii-video-source" class="hidden" autoplay muted playsinline></video>
+            <canvas id="ascii-video-canvas" class="hidden"></canvas>
+        </article>
+    </section>
 </div>
 
-<div class="pointer-events-none fixed bottom-4 right-4 z-[9900] rounded-lg border border-cyan-600/45 bg-white/85 px-3 py-2 text-[11px] font-bold tracking-[0.2em] text-cyan-800 shadow-[0_0_0_1px_rgba(6,182,212,.2),0_0_16px_rgba(6,182,212,.15)] backdrop-blur dark:border-green-500/45 dark:bg-black/70 dark:text-green-300 dark:shadow-[0_0_0_1px_rgba(34,197,94,.2),0_0_16px_rgba(34,197,94,.15)]">
+<div class="pointer-events-none fixed bottom-28 sm:bottom-4 max-sm:left-4 sm:right-4 z-[9900] rounded-lg border border-cyan-600/45 bg-white/85 px-3 py-2 text-[11px] font-bold tracking-[0.2em] text-cyan-800 shadow-[0_0_0_1px_rgba(6,182,212,.2),0_0_16px_rgba(6,182,212,.15)] backdrop-blur dark:border-green-500/45 dark:bg-black/70 dark:text-green-300 dark:shadow-[0_0_0_1px_rgba(34,197,94,.2),0_0_16px_rgba(34,197,94,.15)]">
     FPS <span data-perf="fps" class="ml-1">--</span>
+    <span class="mx-2 opacity-60">|</span>
+    SCR <span data-perf="scroll-speed" class="ml-1 min-w-[50px] inline-block">0</span>
+</div>
+<div class="fixed bottom-4 left-4 z-[9900] w-[min(92vw,320px)] rounded-lg border border-cyan-600/45 bg-white/90 p-3 text-cyan-900 shadow-[0_0_0_1px_rgba(6,182,212,.2),0_0_16px_rgba(6,182,212,.15)] backdrop-blur dark:border-green-500/45 dark:bg-black/75 dark:text-green-200 dark:shadow-[0_0_0_1px_rgba(34,197,94,.2),0_0_16px_rgba(34,197,94,.15)]">
+    <p class="text-[10px] font-bold uppercase tracking-[0.3em]">Background Audio</p>
+    <div class="mt-2 flex items-center gap-3">
+        <button id="music-toggle"
+                class="rounded-md border border-cyan-700/45 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-cyan-800 transition hover:bg-cyan-500/10 dark:border-green-500/50 dark:text-green-300 dark:hover:bg-green-500/10"
+                type="button">
+            Stop
+        </button>
+        <label class="flex w-full items-center gap-2 text-[10px] uppercase tracking-[0.2em]">
+            Volume
+            <input id="music-volume" class="w-full accent-cyan-600 dark:accent-green-400" type="range" min="0" max="100" step="1" value="50"/>
+        </label>
+    </div>
+    <audio id="site-music" src="assets/site-music.mp3" preload="metadata" loop></audio>
 </div>
 <div id="leave-modal"
      class="fixed inset-0 z-[10020] hidden items-center justify-center bg-black/65 p-4 opacity-0 transition duration-300">
