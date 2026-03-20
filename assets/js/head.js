@@ -53,6 +53,10 @@ window.tailwind.config = {
           '0%, 100%': { filter: 'drop-shadow(0 0 0px rgba(6,182,212,0.0))' },
           '50%': { filter: 'drop-shadow(0 0 12px rgba(6,182,212,0.45))' },
         },
+        syncFlow: {
+          '0%': { left: '0%' },
+          '100%': { left: 'calc(100% - 0.5rem)' },
+        },
       },
       animation: {
         'fade-up': 'fadeUp .7s ease-out both',
@@ -61,13 +65,19 @@ window.tailwind.config = {
         'bg-drift-a': 'bgDriftA 18s ease-in-out infinite',
         'bg-drift-b': 'bgDriftB 21s ease-in-out infinite',
         'neon-pulse': 'neonPulse 3s ease-in-out infinite',
+        'sync-flow': 'syncFlow 1.4s ease-in-out infinite alternate',
       },
     },
   },
 };
 
 (() => {
-  const savedTheme = localStorage.getItem('theme');
+  let savedTheme = null;
+  try {
+    savedTheme = localStorage.getItem('theme');
+  } catch (_error) {
+    savedTheme = null;
+  }
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
     document.documentElement.classList.add('dark');

@@ -9,22 +9,34 @@ const splashProgressEl = document.getElementById('splash-progress');
 const cursorDot = document.getElementById('cursor-dot');
 const cursorRing = document.getElementById('cursor-ring');
 const returningToastEl = document.getElementById('returning-toast');
+const multiTabsToastEl = document.getElementById('multi-tabs-toast');
 const lowBatteryToastEl = document.getElementById('low-battery-toast');
 const resizeToastEl = document.getElementById('resize-toast');
 const leaveModalEl = document.getElementById('leave-modal');
+const leaveModalDialogEl = document.getElementById('leave-modal-dialog');
 const leaveStayBtn = document.getElementById('leave-stay-btn');
 const leaveConfirmBtn = document.getElementById('leave-confirm-btn');
+const shareCvBtn = document.getElementById('share-cv-btn');
+const speakIntroBtn = document.getElementById('speak-intro-btn');
 const musicAudioEl = document.getElementById('site-music');
 const musicToggleBtn = document.getElementById('music-toggle');
 const musicVolumeEl = document.getElementById('music-volume');
 const voiceToggleBtn = document.getElementById('voice-toggle');
 const voiceToastEl = document.getElementById('voice-toast');
 const voiceToastTextEl = document.getElementById('voice-toast-text');
+const multiWindowBadgeEl = document.getElementById('multi-window-badge');
+const multiWindowCountEl = document.querySelector('[data-multi-count]');
+const multiSyncInfoEl = document.getElementById('multi-sync-info');
+const easterHintSectionEl = document.getElementById('easter-hint-section');
+const asciiMirrorSectionEl = document.getElementById('ascii-mirror-section');
+const asciiRewardAnchorEl = document.getElementById('ascii-reward-anchor');
+const asciiDefaultAnchorEl = document.getElementById('ascii-default-anchor');
 const asciiToggleBtn = document.getElementById('ascii-toggle');
 const asciiStatusEl = document.getElementById('ascii-status');
 const asciiOutputCanvasEl = document.getElementById('ascii-output-canvas');
 const asciiVideoEl = document.getElementById('ascii-video-source');
 const asciiCanvasEl = document.getElementById('ascii-video-canvas');
+const pipOfferVideoEl = document.getElementById('pip-offer-video');
 const visitCountEl = document.querySelector('[data-visit-count]');
 const fpsEl = document.querySelector('[data-perf="fps"]');
 const scrollSpeedEl = document.querySelector('[data-perf="scroll-speed"]');
@@ -33,7 +45,7 @@ const TYPING_SPEED = {
     access: 55,
     name: 70,
     role: 40,
-    summaryWords: 48,
+    summaryWords: 24,
 };
 const METRIC_INTERVAL = 4200;
 const FPS_UPDATE_INTERVAL = 600;
@@ -48,9 +60,23 @@ const RESIZE_TOAST_DEBOUNCE = 260;
 const RESIZE_TOAST_COOLDOWN = 7000;
 const RESIZE_WIDTH_THRESHOLD = 16;
 const VOICE_TOAST_DURATION = 4800;
+const THEME_STORAGE_KEY = 'theme';
+const MULTI_SYNC_CHANNEL = 'vd_portfolio_multi_sync';
+const WINDOW_REGISTRY_KEY = 'vd_window_registry';
+const WINDOW_PRESENCE_TTL = 7000;
+const WINDOW_PRESENCE_HEARTBEAT = 2200;
+const EASTER_MIN_WINDOWS = 3;
+const EASTER_TOAST_DURATION = 4200;
+const EASTER_CONFETTI_DURATION = 5200;
+const EASTER_UNLOCKED_KEY = 'vd_easter_unlocked';
+const DEFAULT_TOAST_DURATION = 4200;
+const LOW_BATTERY_TOAST_DURATION = 4800;
+const RESIZE_TOAST_DURATION = 2600;
+const CV_FILE_PATH = 'assets/Vladyslav_Druziakin_CV.pdf';
 const MUSIC_STATE_KEY = 'vd_music_enabled';
 const MUSIC_VOLUME_KEY = 'vd_music_volume';
 const DEFAULT_MUSIC_VOLUME = 0.3;
+const PIP_OFFER_TEXT = 'I am still waiting for my offer )';
 const ASCII_FOREGROUND_CHARSET = ' .,:;i1tfLCG08@ANGULARRXJSNGRXTS';
 const ASCII_BACKGROUND_CHARSET = '   ..::';
 const ASCII_EDGE_WEIGHT = 0.5;
@@ -80,6 +106,24 @@ let asciiRafId = null;
 let asciiLastFrameTime = 0;
 let asciiRunning = false;
 let asciiOutputCtx = null;
+let pipRenderRafId = null;
+let pipUserActivated = false;
+let introUtterance = null;
+let asciiLastLines = ['ASCII mirror standby...'];
+let multiSyncChannel = null;
+let applyingRemoteSync = false;
+let windowPresenceTimer = null;
+let multiTabsWasActive = false;
+const toastTimers = new WeakMap();
+let easterConfettiRafId = null;
+let easterConfettiCanvas = null;
+let lastFocusedBeforeModal = null;
+let easterUnlocked = false;
+let applyMusicEnabledState = null;
+const WINDOW_TAB_ID =
+    (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : `tab-${ Date.now() }-${ Math.random().toString(16).slice(2) }`;
 const initialTitle = document.title;
 const initialFaviconHref =
     document.querySelector('link[rel="icon"]')?.getAttribute('href') ||
@@ -116,7 +160,6 @@ const interval = setInterval(() => {
     i++;
     if (i === frames.length) {
         clearInterval(interval);
-        console.log('%cИнспектируете? Значит, я вас заинтересовал. 😎 Вместо того чтобы копаться в DOM-дереве, давайте обсудим, как я могу усилить вашу команду.', 'color: #00ff00; font-size: 20px; font-weight: bold;');
         console.log('%cInspecting? Guess I’ve caught your eye. 😎 Instead of digging through the DOM tree, let’s talk about how I can bring value to your team.', 'color: #00ff00; font-size: 20px; font-weight: bold;');
         console.log(`
 ▒▒▒▒▒▒▒▒▄▄▄▄▄▄▄▄▒▒▒▒▒▒▒▒
@@ -140,30 +183,499 @@ const renderThemeButton = () => {
     if (!themeToggle) return;
     const isDark = root.classList.contains('dark');
     themeToggle.textContent = isDark ? 'Switch To Light' : 'Switch To Dark';
+    themeToggle.setAttribute('aria-pressed', String(isDark));
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const clientDataLabels = document.querySelectorAll('[data-client]');
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const setButtonPressed = (button, isPressed) => {
+    if (!button) return;
+    button.setAttribute('aria-pressed', String(Boolean(isPressed)));
+};
+const storageGet = (key) => {
+    try {
+        return localStorage.getItem(key);
+    } catch (_error) {
+        return null;
+    }
+};
+const storageSet = (key, value) => {
+    try {
+        localStorage.setItem(key, value);
+    } catch (_error) {
+        // Ignore storage restrictions and private-mode exceptions.
+    }
+};
+easterUnlocked = storageGet(EASTER_UNLOCKED_KEY) === '1';
+
+const showToast = (toastEl, duration = DEFAULT_TOAST_DURATION) => {
+    if (!toastEl) return;
+
+    const existingTimer = toastTimers.get(toastEl);
+    if (existingTimer) {
+        clearTimeout(existingTimer);
+    }
+
+    toastEl.classList.remove('hidden');
+    requestAnimationFrame(() => {
+        toastEl.classList.remove('opacity-0', 'translate-y-2');
+        toastEl.classList.add('opacity-100', 'translate-y-0');
+    });
+
+    const timerId = setTimeout(() => {
+        toastEl.classList.remove('opacity-100', 'translate-y-0');
+        toastEl.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => {
+            toastEl.classList.add('hidden');
+        }, 520);
+        toastTimers.delete(toastEl);
+    }, duration);
+
+    toastTimers.set(toastEl, timerId);
+};
+
+const broadcastSync = (payload) => {
+    if (applyingRemoteSync) return;
+    if (!multiSyncChannel) return;
+    try {
+        multiSyncChannel.postMessage(payload);
+    } catch (_error) {
+        // Ignore cross-window sync errors.
+    }
+};
+
+const readWindowRegistry = () => {
+    try {
+        const raw = storageGet(WINDOW_REGISTRY_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_error) {
+        return {};
+    }
+};
+
+const writeWindowRegistry = (registry) => {
+    try {
+        storageSet(WINDOW_REGISTRY_KEY, JSON.stringify(registry));
+    } catch (_error) {
+        // Ignore storage write errors.
+    }
+};
+
+const getActiveWindowCount = () => {
+    const now = Date.now();
+    const registry = readWindowRegistry();
+    let mutated = false;
+    Object.keys(registry).forEach((key) => {
+        if (now - Number(registry[key]) > WINDOW_PRESENCE_TTL) {
+            delete registry[key];
+            mutated = true;
+        }
+    });
+    if (mutated) writeWindowRegistry(registry);
+    return Object.keys(registry).length;
+};
+
+const renderMultiWindowState = () => {
+    const activeCount = getActiveWindowCount();
+    const isLinked = activeCount >= 2;
+    const easterActive = activeCount >= EASTER_MIN_WINDOWS;
+    const easterVisible = easterActive || easterUnlocked;
+    if (multiWindowBadgeEl) {
+        multiWindowBadgeEl.classList.toggle('hidden', !isLinked);
+    }
+    if (multiWindowCountEl) {
+        multiWindowCountEl.textContent = `${ activeCount }`;
+    }
+    if (multiSyncInfoEl) {
+        multiSyncInfoEl.classList.toggle('hidden', !isLinked);
+    }
+    if (easterHintSectionEl) {
+        easterHintSectionEl.classList.toggle('hidden', easterVisible);
+    }
+    if (isLinked && !multiTabsWasActive) {
+        showMultiTabsToast();
+    }
+    multiTabsWasActive = isLinked;
+    syncAsciiRewardPlacement(easterVisible);
+    if (easterActive && !easterUnlocked) {
+        easterUnlocked = true;
+        storageSet(EASTER_UNLOCKED_KEY, '1');
+        showEasterToast();
+        launchEasterConfetti();
+    }
+};
+
+const syncAsciiRewardPlacement = (easterActive) => {
+    if (!asciiMirrorSectionEl || !asciiRewardAnchorEl || !asciiDefaultAnchorEl) return;
+    if (easterActive) {
+        asciiRewardAnchorEl.classList.remove('hidden');
+        if (asciiMirrorSectionEl.parentElement !== asciiRewardAnchorEl) {
+            asciiRewardAnchorEl.appendChild(asciiMirrorSectionEl);
+        }
+        asciiMirrorSectionEl.classList.remove('hidden');
+        drawAsciiOutput(asciiLastLines);
+        return;
+    }
+
+    asciiRewardAnchorEl.classList.add('hidden');
+    asciiMirrorSectionEl.classList.add('hidden');
+    if (asciiRunning) {
+        stopAsciiMirror();
+    }
+    if (asciiMirrorSectionEl.parentElement !== asciiDefaultAnchorEl.parentElement) {
+        asciiDefaultAnchorEl.insertAdjacentElement('afterend', asciiMirrorSectionEl);
+    }
+};
+
+const showMultiTabsToast = () => {
+    showToast(multiTabsToastEl, DEFAULT_TOAST_DURATION);
+};
+
+const showEasterToast = () => {
+    const toast = document.getElementById('easter-toast');
+    showToast(toast, EASTER_TOAST_DURATION);
+};
+
+const launchEasterConfetti = () => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    if (easterConfettiRafId) {
+        cancelAnimationFrame(easterConfettiRafId);
+        easterConfettiRafId = null;
+    }
+    if (easterConfettiCanvas) {
+        easterConfettiCanvas.remove();
+        easterConfettiCanvas = null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'pointer-events-none fixed inset-0 z-[9970]';
+    document.body.appendChild(canvas);
+    easterConfettiCanvas = canvas;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(window.innerWidth * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const colors = ['#22d3ee', '#06b6d4', '#4ade80', '#22c55e', '#e879f9'];
+    const particles = Array.from({ length: 110 }, () => ({
+        x: Math.random() * window.innerWidth,
+        y: -20 - Math.random() * window.innerHeight * 0.24,
+        size: 3 + Math.random() * 5,
+        vy: 2 + Math.random() * 4.2,
+        vx: -2 + Math.random() * 4,
+        rot: Math.random() * Math.PI,
+        spin: -0.16 + Math.random() * 0.32,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 0.75 + Math.random() * 0.25,
+    }));
+
+    const start = performance.now();
+    const tick = (now) => {
+        const elapsed = now - start;
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+        for (const particle of particles) {
+            particle.x += particle.vx;
+            particle.y += particle.vy;
+            particle.rot += particle.spin;
+            particle.vy += 0.014;
+
+            ctx.save();
+            ctx.translate(particle.x, particle.y);
+            ctx.rotate(particle.rot);
+            ctx.fillStyle = particle.color;
+            ctx.globalAlpha = particle.alpha;
+            ctx.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size * 0.72);
+            ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+
+        if (elapsed < EASTER_CONFETTI_DURATION) {
+            easterConfettiRafId = requestAnimationFrame(tick);
+            return;
+        }
+
+        if (easterConfettiCanvas) {
+            easterConfettiCanvas.remove();
+            easterConfettiCanvas = null;
+        }
+        easterConfettiRafId = null;
+    };
+
+    easterConfettiRafId = requestAnimationFrame(tick);
+    setTimeout(() => {
+        if (!easterConfettiCanvas) return;
+        easterConfettiCanvas.remove();
+        easterConfettiCanvas = null;
+        if (easterConfettiRafId) {
+            cancelAnimationFrame(easterConfettiRafId);
+            easterConfettiRafId = null;
+        }
+    }, EASTER_CONFETTI_DURATION + 220);
+};
+
+const touchWindowPresence = () => {
+    const now = Date.now();
+    const registry = readWindowRegistry();
+    registry[WINDOW_TAB_ID] = now;
+    writeWindowRegistry(registry);
+    renderMultiWindowState();
+    broadcastSync({ type: 'presencePing', tabId: WINDOW_TAB_ID, at: now });
+};
+
+const removeWindowPresence = () => {
+    const registry = readWindowRegistry();
+    if (WINDOW_TAB_ID in registry) {
+        delete registry[WINDOW_TAB_ID];
+        writeWindowRegistry(registry);
+    }
+    renderMultiWindowState();
+    broadcastSync({ type: 'presencePing', tabId: WINDOW_TAB_ID, at: Date.now() });
+};
+
+const initMultiWindowPresence = () => {
+    touchWindowPresence();
+    if (windowPresenceTimer) clearInterval(windowPresenceTimer);
+    windowPresenceTimer = setInterval(() => {
+        touchWindowPresence();
+    }, WINDOW_PRESENCE_HEARTBEAT);
+
+    window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            touchWindowPresence();
+            return;
+        }
+        renderMultiWindowState();
+    });
+
+    window.addEventListener('storage', (event) => {
+        if (event.key !== WINDOW_REGISTRY_KEY) return;
+        renderMultiWindowState();
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (windowPresenceTimer) {
+            clearInterval(windowPresenceTimer);
+            windowPresenceTimer = null;
+        }
+        removeWindowPresence();
+    });
+};
+
+const initOfferPictureInPicture = () => {
+    if (!pipOfferVideoEl) return;
+    if (!document.pictureInPictureEnabled) return;
+
+    const markActivated = () => {
+        pipUserActivated = true;
+        window.removeEventListener('pointerdown', markActivated);
+        window.removeEventListener('keydown', markActivated);
+    };
+    window.addEventListener('pointerdown', markActivated, { once: true });
+    window.addEventListener('keydown', markActivated, { once: true });
+
+    const pipCanvas = document.createElement('canvas');
+    pipCanvas.width = 640;
+    pipCanvas.height = 360;
+    const pipCtx = pipCanvas.getContext('2d');
+    if (!pipCtx) return;
+
+    const renderPipFrame = (time = 0) => {
+        const dark = root.classList.contains('dark');
+        const bg = dark ? '#020617' : '#020617';
+        const accent = dark ? '#86efac' : '#22d3ee';
+        const accentAlt = dark ? '#4ade80' : '#06b6d4';
+
+        pipCtx.fillStyle = bg;
+        pipCtx.fillRect(0, 0, pipCanvas.width, pipCanvas.height);
+
+        pipCtx.strokeStyle = `${ accent }aa`;
+        pipCtx.lineWidth = 3;
+        pipCtx.strokeRect(12, 12, pipCanvas.width - 24, pipCanvas.height - 24);
+
+        const pulse = 0.6 + 0.4 * Math.sin(time / 420);
+        pipCtx.fillStyle = `${ accentAlt }`;
+        pipCtx.font = '700 20px JetBrains Mono, monospace';
+        pipCtx.textAlign = 'center';
+        pipCtx.fillText('STILL ONLINE', pipCanvas.width / 2, 92);
+
+        pipCtx.fillStyle = dark ? `rgba(134,239,172,${ pulse })` : `rgba(34,211,238,${ pulse })`;
+        pipCtx.font = '700 28px JetBrains Mono, monospace';
+        const offerLines = PIP_OFFER_TEXT.split(' ');
+        const firstLine = offerLines.slice(0, 4).join(' ');
+        const secondLine = offerLines.slice(4).join(' ');
+        pipCtx.fillText(firstLine, pipCanvas.width / 2, 182);
+        pipCtx.fillText(secondLine, pipCanvas.width / 2, 224);
+
+        pipCtx.fillStyle = dark ? '#dcfce7' : '#cffafe';
+        pipCtx.font = '500 14px JetBrains Mono, monospace';
+        pipCtx.fillText('Return to tab any time', pipCanvas.width / 2, 292);
+
+        pipRenderRafId = requestAnimationFrame(renderPipFrame);
+    };
+
+    renderPipFrame();
+    const stream = pipCanvas.captureStream(12);
+    pipOfferVideoEl.srcObject = stream;
+    pipOfferVideoEl.play().catch(() => {
+        // Ignore autoplay restrictions; PiP may still work after user gesture.
+    });
+
+    const startPip = async () => {
+        if (!pipUserActivated) return;
+        if (document.pictureInPictureElement) return;
+        try {
+            await pipOfferVideoEl.requestPictureInPicture();
+        } catch (_error) {
+            // Browser can reject PiP without explicit user gesture/context.
+        }
+    };
+
+    const stopPip = async () => {
+        if (document.pictureInPictureElement !== pipOfferVideoEl) return;
+        try {
+            await document.exitPictureInPicture();
+        } catch (_error) {
+            // Ignore exit errors.
+        }
+    };
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            startPip();
+            return;
+        }
+        stopPip();
+    });
+};
+
+const initShareCv = () => {
+    if (!shareCvBtn) return;
+
+    shareCvBtn.addEventListener('click', async () => {
+        const cvUrl = new URL(CV_FILE_PATH, window.location.href).href;
+        const sharePayload = {
+            title: 'Vladyslav Druziakin CV - Senior Angular Frontend Developer',
+            text: 'https://vladyslavdruziakin.github.io/',
+            url: cvUrl,
+        };
+
+        if (!navigator.share) {
+            window.open(cvUrl, '_blank', 'noopener,noreferrer');
+            return;
+        }
+
+        try {
+            const response = await fetch(cvUrl);
+            if (response.ok) {
+                const blob = await response.blob();
+                const file = new File([blob], 'Vladyslav_Druziakin_CV.pdf', { type: 'application/pdf' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: sharePayload.title,
+                        text: sharePayload.text,
+                        files: [file],
+                    });
+                    return;
+                }
+            }
+            await navigator.share(sharePayload);
+        } catch (_error) {
+            window.open(cvUrl, '_blank', 'noopener,noreferrer');
+        }
+    });
+};
+
+const initIntroSpeech = () => {
+    if (!speakIntroBtn) return;
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+        speakIntroBtn.textContent = 'Speech N/A';
+        speakIntroBtn.disabled = true;
+        speakIntroBtn.classList.add('opacity-60', 'cursor-not-allowed');
+        return;
+    }
+
+    const buildIntroText = () => {
+        const name = heroNameEl?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        const role = heroRoleEl?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        const summary = summaryTextEl?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        return [name, role, summary].filter(Boolean).join('. ');
+    };
+
+    const syncIntroButton = () => {
+        const speaking = window.speechSynthesis.speaking || window.speechSynthesis.pending;
+        speakIntroBtn.textContent = speaking ? 'Stop Reading' : 'Read Intro';
+        setButtonPressed(speakIntroBtn, speaking);
+    };
+
+    const stopIntroSpeech = () => {
+        window.speechSynthesis.cancel();
+        introUtterance = null;
+        syncIntroButton();
+    };
+
+    speakIntroBtn.addEventListener('click', () => {
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+            stopIntroSpeech();
+            return;
+        }
+
+        const text = buildIntroText();
+        if (!text) return;
+        introUtterance = new SpeechSynthesisUtterance(text);
+        introUtterance.lang = 'en-US';
+        introUtterance.rate = 1;
+        introUtterance.pitch = 1;
+        introUtterance.onend = () => {
+            introUtterance = null;
+            syncIntroButton();
+        };
+        introUtterance.onerror = () => {
+            introUtterance = null;
+            syncIntroButton();
+        };
+
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(introUtterance);
+        syncIntroButton();
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+            window.speechSynthesis.cancel();
+        }
+    });
+
+    syncIntroButton();
+};
 
 const drawAsciiOutput = (lines) => {
     if (!asciiOutputCanvasEl) return;
+    asciiLastLines = lines;
     if (!asciiOutputCtx) {
         asciiOutputCtx = asciiOutputCanvasEl.getContext('2d');
     }
     if (!asciiOutputCtx) return;
 
     const isMobile = window.matchMedia('(max-width: 767px)').matches;
-    const outputSize = isMobile ? ASCII_OUTPUT_SIZE_MOBILE : ASCII_OUTPUT_SIZE_DESKTOP;
+    const fallbackSize = isMobile ? ASCII_OUTPUT_SIZE_MOBILE : ASCII_OUTPUT_SIZE_DESKTOP;
+    const measuredWidth = Math.floor(asciiOutputCanvasEl.getBoundingClientRect().width || 0);
+    const outputSize = Math.max(220, measuredWidth || fallbackSize);
     const dpr = clamp(window.devicePixelRatio || 1, 1, 2);
     const realWidth = Math.floor(outputSize * dpr);
     const realHeight = Math.floor(outputSize * dpr);
     if (asciiOutputCanvasEl.width !== realWidth || asciiOutputCanvasEl.height !== realHeight) {
         asciiOutputCanvasEl.width = realWidth;
         asciiOutputCanvasEl.height = realHeight;
-        asciiOutputCanvasEl.style.width = `${ outputSize }px`;
-        asciiOutputCanvasEl.style.height = `${ outputSize }px`;
     }
     asciiOutputCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     asciiOutputCtx.imageSmoothingEnabled = false;
@@ -199,6 +711,7 @@ const setAsciiStatus = (text) => {
 const syncAsciiToggle = () => {
     if (!asciiToggleBtn) return;
     asciiToggleBtn.textContent = asciiRunning ? 'Stop' : 'Start';
+    setButtonPressed(asciiToggleBtn, asciiRunning);
 };
 
 const stopAsciiMirror = () => {
@@ -349,6 +862,9 @@ const initAsciiMirror = () => {
     window.addEventListener('beforeunload', () => {
         if (asciiStream) stopAsciiMirror();
     });
+    window.addEventListener('resize', () => {
+        drawAsciiOutput(asciiLastLines);
+    });
 };
 
 const initBackgroundMusic = () => {
@@ -356,30 +872,42 @@ const initBackgroundMusic = () => {
 
     const syncMusicButton = () => {
         musicToggleBtn.textContent = musicAudioEl.paused ? 'Play' : 'Stop';
+        setButtonPressed(musicToggleBtn, !musicAudioEl.paused);
     };
 
     const persistMusicState = (isPlaying) => {
-        try {
-            localStorage.setItem(MUSIC_STATE_KEY, isPlaying ? '1' : '0');
-        } catch (_error) {
-            // Ignore storage limits/privacy restrictions.
-        }
+        storageSet(MUSIC_STATE_KEY, isPlaying ? '1' : '0');
     };
 
-    const playMusic = async () => {
+    const playMusic = async ({ broadcast = true, persist = true } = {}) => {
         try {
             await musicAudioEl.play();
-            persistMusicState(true);
+            if (persist) persistMusicState(true);
+            if (broadcast) broadcastSync({ type: 'musicEnabled', value: true });
         } catch (_error) {
             // Autoplay may be blocked by browser policy until user interaction.
         } finally {
             syncMusicButton();
         }
     };
+    const stopMusic = ({ broadcast = true, persist = true } = {}) => {
+        musicAudioEl.pause();
+        if (persist) persistMusicState(false);
+        if (broadcast) broadcastSync({ type: 'musicEnabled', value: false });
+        shouldResumeMusicOnFocus = false;
+        syncMusicButton();
+    };
+    applyMusicEnabledState = (enabled, options = {}) => {
+        if (enabled) {
+            void playMusic(options);
+            return;
+        }
+        stopMusic(options);
+    };
 
     let initialVolume = DEFAULT_MUSIC_VOLUME;
     try {
-        const storedVolume = Number.parseFloat(localStorage.getItem(MUSIC_VOLUME_KEY) ?? '');
+        const storedVolume = Number.parseFloat(storageGet(MUSIC_VOLUME_KEY) ?? '');
         if (Number.isFinite(storedVolume)) {
             initialVolume = clamp(storedVolume, 0, 1);
         }
@@ -392,36 +920,30 @@ const initBackgroundMusic = () => {
 
     let shouldAutoPlay = true;
     try {
-        shouldAutoPlay = localStorage.getItem(MUSIC_STATE_KEY) !== '0';
+        shouldAutoPlay = storageGet(MUSIC_STATE_KEY) !== '0';
     } catch (_error) {
         shouldAutoPlay = true;
     }
 
     if (shouldAutoPlay) {
-        playMusic();
+        void playMusic();
     } else {
-        musicAudioEl.pause();
-        syncMusicButton();
+        stopMusic({ broadcast: false, persist: false });
     }
 
     musicToggleBtn.addEventListener('click', () => {
         if (musicAudioEl.paused) {
-            playMusic();
+            void playMusic();
             return;
         }
-        musicAudioEl.pause();
-        persistMusicState(false);
-        syncMusicButton();
+        stopMusic();
     });
 
     musicVolumeEl.addEventListener('input', () => {
         const volume = clamp(Number.parseInt(musicVolumeEl.value, 10) / 100, 0, 1);
         musicAudioEl.volume = volume;
-        try {
-            localStorage.setItem(MUSIC_VOLUME_KEY, `${ volume }`);
-        } catch (_error) {
-            // Ignore storage limits/privacy restrictions.
-        }
+        storageSet(MUSIC_VOLUME_KEY, `${ volume }`);
+        broadcastSync({ type: 'musicVolume', value: volume });
     });
 
     musicAudioEl.addEventListener('play', syncMusicButton);
@@ -432,12 +954,65 @@ const initBackgroundMusic = () => {
 const applyThemeMode = (mode) => {
     if (mode === 'dark') {
         root.classList.add('dark');
-        localStorage.setItem('theme', 'dark');
+        storageSet(THEME_STORAGE_KEY, 'dark');
     } else {
         root.classList.remove('dark');
-        localStorage.setItem('theme', 'light');
+        storageSet(THEME_STORAGE_KEY, 'light');
     }
     renderThemeButton();
+};
+
+const initMultiWindowSync = () => {
+    const applyRemotePayload = (payload) => {
+        if (!payload || typeof payload !== 'object') return;
+        applyingRemoteSync = true;
+        try {
+            if (payload.type === 'theme') {
+                applyThemeMode(payload.value === 'dark' ? 'dark' : 'light');
+            }
+            if (payload.type === 'musicEnabled' && musicAudioEl && musicToggleBtn) {
+                const shouldPlay = Boolean(payload.value);
+                if (applyMusicEnabledState) {
+                    applyMusicEnabledState(shouldPlay, { broadcast: false, persist: true });
+                }
+            }
+            if (payload.type === 'musicVolume' && musicAudioEl && musicVolumeEl) {
+                const volume = clamp(Number(payload.value), 0, 1);
+                musicAudioEl.volume = volume;
+                musicVolumeEl.value = `${ Math.round(volume * 100) }`;
+                storageSet(MUSIC_VOLUME_KEY, `${ volume }`);
+            }
+            if (payload.type === 'presencePing') {
+                renderMultiWindowState();
+            }
+        } finally {
+            applyingRemoteSync = false;
+        }
+    };
+
+    if ('BroadcastChannel' in window) {
+        multiSyncChannel = new BroadcastChannel(MULTI_SYNC_CHANNEL);
+        multiSyncChannel.addEventListener('message', (event) => {
+            applyRemotePayload(event.data);
+        });
+    }
+
+    window.addEventListener('storage', (event) => {
+        if (event.key === THEME_STORAGE_KEY && event.newValue) {
+            applyRemotePayload({ type: 'theme', value: event.newValue });
+            return;
+        }
+        if (event.key === MUSIC_STATE_KEY && event.newValue) {
+            applyRemotePayload({ type: 'musicEnabled', value: event.newValue === '1' });
+            return;
+        }
+        if (event.key === MUSIC_VOLUME_KEY && event.newValue) {
+            const volume = Number.parseFloat(event.newValue);
+            if (Number.isFinite(volume)) {
+                applyRemotePayload({ type: 'musicVolume', value: volume });
+            }
+        }
+    });
 };
 
 const initVoiceControl = () => {
@@ -449,11 +1024,13 @@ const initVoiceControl = () => {
             voiceToggleBtn.textContent = 'Voice N/A';
             voiceToggleBtn.disabled = true;
             voiceToggleBtn.classList.add('opacity-60', 'cursor-not-allowed');
+            setButtonPressed(voiceToggleBtn, false);
             return;
         }
         voiceToggleBtn.textContent = isActive ? 'Voice On' : 'Voice Off';
         voiceToggleBtn.classList.toggle('bg-cyan-500/15', isActive);
         voiceToggleBtn.classList.toggle('dark:bg-green-500/15', isActive);
+        setButtonPressed(voiceToggleBtn, isActive);
     };
 
     if (!SpeechRecognitionApi) {
@@ -467,7 +1044,6 @@ const initVoiceControl = () => {
     recognition.interimResults = false;
 
     let shouldListen = false;
-    let voiceToastTimer = null;
 
     const showVoiceToast = (message, heardText = '') => {
         if (!voiceToastEl || !voiceToastTextEl) return;
@@ -475,20 +1051,7 @@ const initVoiceControl = () => {
         voiceToastTextEl.textContent = normalizedHeardText
             ? `${ message } You said: "${ normalizedHeardText }".`
             : message;
-        voiceToastEl.classList.remove('hidden');
-        requestAnimationFrame(() => {
-            voiceToastEl.classList.remove('opacity-0', 'translate-y-2');
-            voiceToastEl.classList.add('opacity-100', 'translate-y-0');
-        });
-
-        if (voiceToastTimer) clearTimeout(voiceToastTimer);
-        voiceToastTimer = setTimeout(() => {
-            voiceToastEl.classList.remove('opacity-100', 'translate-y-0');
-            voiceToastEl.classList.add('opacity-0', 'translate-y-2');
-            setTimeout(() => {
-                voiceToastEl.classList.add('hidden');
-            }, 520);
-        }, VOICE_TOAST_DURATION);
+        showToast(voiceToastEl, VOICE_TOAST_DURATION);
     };
 
     const runCommand = (rawCommand) => {
@@ -629,37 +1192,11 @@ const initBatteryInfo = async () => {
 };
 
 const showReturningVisitorToast = () => {
-    if (!returningToastEl) return;
-    returningToastEl.classList.remove('hidden');
-    requestAnimationFrame(() => {
-        returningToastEl.classList.remove('opacity-0', 'translate-y-2');
-        returningToastEl.classList.add('opacity-100', 'translate-y-0');
-    });
-
-    setTimeout(() => {
-        returningToastEl.classList.remove('opacity-100', 'translate-y-0');
-        returningToastEl.classList.add('opacity-0', 'translate-y-2');
-        setTimeout(() => {
-            returningToastEl.classList.add('hidden');
-        }, 520);
-    }, 4200);
+    showToast(returningToastEl, DEFAULT_TOAST_DURATION);
 };
 
 const showLowBatteryToast = () => {
-    if (!lowBatteryToastEl) return;
-    lowBatteryToastEl.classList.remove('hidden');
-    requestAnimationFrame(() => {
-        lowBatteryToastEl.classList.remove('opacity-0', 'translate-y-2');
-        lowBatteryToastEl.classList.add('opacity-100', 'translate-y-0');
-    });
-
-    setTimeout(() => {
-        lowBatteryToastEl.classList.remove('opacity-100', 'translate-y-0');
-        lowBatteryToastEl.classList.add('opacity-0', 'translate-y-2');
-        setTimeout(() => {
-            lowBatteryToastEl.classList.add('hidden');
-        }, 520);
-    }, 4800);
+    showToast(lowBatteryToastEl, LOW_BATTERY_TOAST_DURATION);
 };
 
 const shouldNotifyLowBattery = (level, charging) => {
@@ -678,15 +1215,15 @@ const shouldNotifyLowBattery = (level, charging) => {
 
 const handleReturningVisitor = () => {
     try {
-        const previousCount = Number.parseInt(localStorage.getItem(VISIT_COUNT_KEY) ?? '0', 10);
+        const previousCount = Number.parseInt(storageGet(VISIT_COUNT_KEY) ?? '0', 10);
         const safeCount = Number.isFinite(previousCount) && previousCount > 0 ? previousCount : 0;
         const nextCount = safeCount + 1;
-        const visited = localStorage.getItem(RETURNING_VISITOR_KEY) === '1' || safeCount > 0;
+        const visited = storageGet(RETURNING_VISITOR_KEY) === '1' || safeCount > 0;
         if (visitCountEl) {
             visitCountEl.textContent = `${ nextCount }`;
         }
-        localStorage.setItem(VISIT_COUNT_KEY, `${ nextCount }`);
-        localStorage.setItem(RETURNING_VISITOR_KEY, '1');
+        storageSet(VISIT_COUNT_KEY, `${ nextCount }`);
+        storageSet(RETURNING_VISITOR_KEY, '1');
         if (visited) {
             showReturningVisitorToast();
         }
@@ -708,11 +1245,18 @@ const initLeaveWarning = () => {
 const showLeaveModal = (href) => {
   if (!leaveModalEl) return;
   pendingLeaveHref = href;
+  lastFocusedBeforeModal = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  leaveModalEl.setAttribute('aria-hidden', 'false');
   leaveModalEl.classList.remove('hidden');
   leaveModalEl.classList.add('flex');
   requestAnimationFrame(() => {
     leaveModalEl.classList.remove('opacity-0');
     leaveModalEl.classList.add('opacity-100');
+    if (leaveStayBtn) {
+      leaveStayBtn.focus();
+    } else if (leaveModalDialogEl) {
+      leaveModalDialogEl.focus();
+    }
   });
 };
 
@@ -723,11 +1267,16 @@ const hideLeaveModal = () => {
   setTimeout(() => {
     leaveModalEl.classList.add('hidden');
     leaveModalEl.classList.remove('flex');
+    leaveModalEl.setAttribute('aria-hidden', 'true');
+    if (lastFocusedBeforeModal) {
+      lastFocusedBeforeModal.focus();
+      lastFocusedBeforeModal = null;
+    }
   }, 260);
 };
 
 const initCustomLeaveDialog = () => {
-  if (!leaveModalEl || !leaveStayBtn || !leaveConfirmBtn) return;
+  if (!leaveModalEl || !leaveStayBtn || !leaveConfirmBtn || !leaveModalDialogEl) return;
   history.pushState({ guard: true }, '', window.location.href);
 
   document.addEventListener('click', (event) => {
@@ -776,6 +1325,23 @@ const initCustomLeaveDialog = () => {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab' && !leaveModalEl.classList.contains('hidden')) {
+      const focusable = leaveModalEl.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length > 0) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     if (event.key !== 'Escape') return;
     if (leaveModalEl.classList.contains('hidden')) return;
     pendingLeaveHref = '';
@@ -817,9 +1383,12 @@ const initAttentionOnTabBlur = () => {
         }
 
         if (musicAudioEl && shouldResumeMusicOnFocus) {
-            musicAudioEl.play().catch(() => {
-                // Ignore autoplay restrictions after tab focus restore.
-            });
+            const shouldPlayAfterFocus = storageGet(MUSIC_STATE_KEY) !== '0';
+            if (shouldPlayAfterFocus) {
+                musicAudioEl.play().catch(() => {
+                    // Ignore autoplay restrictions after tab focus restore.
+                });
+            }
             shouldResumeMusicOnFocus = false;
         }
     });
@@ -828,19 +1397,7 @@ const initAttentionOnTabBlur = () => {
 const showResizeToast = () => {
     if (!resizeToastEl || !canShowResizeToast) return;
     canShowResizeToast = false;
-    resizeToastEl.classList.remove('hidden');
-    requestAnimationFrame(() => {
-        resizeToastEl.classList.remove('opacity-0', 'translate-y-2');
-        resizeToastEl.classList.add('opacity-100', 'translate-y-0');
-    });
-
-    setTimeout(() => {
-        resizeToastEl.classList.remove('opacity-100', 'translate-y-0');
-        resizeToastEl.classList.add('opacity-0', 'translate-y-2');
-        setTimeout(() => {
-            resizeToastEl.classList.add('hidden');
-        }, 520);
-    }, 2600);
+    showToast(resizeToastEl, RESIZE_TOAST_DURATION);
 
     if (resizeToastCooldownId) clearTimeout(resizeToastCooldownId);
     resizeToastCooldownId = setTimeout(() => {
@@ -851,6 +1408,11 @@ const showResizeToast = () => {
 const initResizeToast = () => {
     if (!resizeToastEl) return;
     window.addEventListener('resize', () => {
+        const isMobileDevice =
+            window.matchMedia('(max-width: 1024px)').matches &&
+            window.matchMedia('(pointer: coarse)').matches;
+        if (isMobileDevice) return;
+
         if (resizeDebounceId) clearTimeout(resizeDebounceId);
         resizeDebounceId = setTimeout(() => {
             const nextWidth = window.innerWidth;
@@ -964,15 +1526,19 @@ initCustomLeaveDialog();
 initAttentionOnTabBlur();
 initResizeToast();
 initBackgroundMusic();
+initMultiWindowSync();
+initMultiWindowPresence();
 initVoiceControl();
 initAsciiMirror();
+initShareCv();
+initOfferPictureInPicture();
+initIntroSpeech();
 
 if (themeToggle) {
     themeToggle.addEventListener('click', () => {
-        root.classList.toggle('dark');
-        const isDark = root.classList.contains('dark');
-        localStorage.setItem('theme', isDark ? 'dark' : 'light');
-        renderThemeButton();
+        const nextMode = root.classList.contains('dark') ? 'light' : 'dark';
+        applyThemeMode(nextMode);
+        broadcastSync({ type: 'theme', value: nextMode });
     });
 }
 
